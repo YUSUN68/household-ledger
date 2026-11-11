@@ -231,8 +231,15 @@
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script>
-  const STORAGE_KEY = 'simple-ledger-v1';
+  // Supabase 연결 정보 (publishable 키는 브라우저에 공개해도 되는 키예요)
+  const SUPABASE_URL = 'https://wkdhpcyuuhnpoqdzhefp.supabase.co';
+  const SUPABASE_KEY = 'sb_publishable_vKxklHaM1ZLVIuuiis4XAA_zAHESlGL';
+  const TABLE = 'ledger_entries';
+  const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+  const STORAGE_KEY = 'simple-ledger-v1'; // 예전 localStorage 데이터 옮기기용
   const CATEGORIES = {
     expense: ['식비', '교통', '쇼핑', '주거', '통신', '의료', '문화', '기타'],
     income: ['월급', '용돈', '부수입', '기타']
@@ -244,8 +251,8 @@
   const iconOf = (type, cat) => (ICONS[type] && ICONS[type][cat]) || (type === 'income' ? '💰' : '📦');
   let selectedDay = null; // 'YYYY-MM-DD' 또는 null
 
-  // 데이터는 브라우저 localStorage에만 저장됩니다 (DB 없음)
-  let items = load();
+  // 데이터는 Supabase의 ledger_entries 테이블에 저장됩니다
+  let items = [];
   let current = new Date();
   current.setDate(1);
 
@@ -254,12 +261,31 @@
   const pad = (n) => String(n).padStart(2, '0');
   const ym = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
 
-  function load() {
-    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
-    catch { return []; }
+  function showError(msg, error) {
+    console.error(msg, error);
+    alert(`${msg} 😢\n${error?.message || ''}`);
   }
-  function save() {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); } catch {}
+
+  async function load() {
+    const { data, error } = await db.from(TABLE)
+      .select('id, type, date, category, amount, memo')
+      .order('date', { ascending: false });
+    if (error) { showError('내역을 불러오지 못했어요', error); return; }
+    items = data.map(r => ({ ...r, amount: Number(r.amount) }));
+    render();
+  }
+
+  // 예전에 브라우저(localStorage)에 저장해 둔 내역이 있으면 DB로 옮겨줌
+  async function migrateLocal() {
+    let old = [];
+    try { old = JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch { return; }
+    if (!old.length) return;
+    if (!confirm(`이 브라우저에 예전 내역 ${old.length}건이 있어요. DB로 옮길까요?`)) return;
+    const rows = old.map(({ type, date, category, amount, memo }) =>
+      ({ type, date, category, amount, memo: memo || '' }));
+    const { error } = await db.from(TABLE).insert(rows);
+    if (error) { showError('예전 내역을 옮기지 못했어요', error); return; }
+    try { localStorage.removeItem(STORAGE_KEY); } catch {}
   }
 
   function getType() {
@@ -380,35 +406,37 @@
   document.querySelectorAll('input[name="type"]').forEach(r =>
     r.addEventListener('change', fillCategories));
 
-  $('form').addEventListener('submit', (e) => {
+  $('form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const amount = Number($('amount').value.replace(/[^\d]/g, ''));
     if (!amount) { alert('금액을 입력하세요'); return; }
-    items.push({
-      id: Date.now(),
+    const submitBtn = e.target.querySelector('.btn');
+    submitBtn.disabled = true;
+    const { error } = await db.from(TABLE).insert({
       type: getType(),
       date: $('date').value,
       category: $('category').value,
       amount,
       memo: $('memo').value.trim()
     });
-    save();
+    submitBtn.disabled = false;
+    if (error) { showError('저장하지 못했어요', error); return; }
     // 입력한 날짜의 달로 이동
-    const d = new Date($('date').value);
-    current = new Date(d.getFullYear(), d.getMonth(), 1);
+    const [y, m] = $('date').value.split('-').map(Number);
+    current = new Date(y, m - 1, 1);
     $('amount').value = '';
     $('memo').value = '';
     $('amount').focus();
-    render();
+    await load();
   });
 
-  $('list').addEventListener('click', (e) => {
+  $('list').addEventListener('click', async (e) => {
     const btn = e.target.closest('.del');
     if (!btn) return;
     if (!confirm('이 내역을 삭제할까요?')) return;
-    items = items.filter(i => i.id !== Number(btn.dataset.id));
-    save();
-    render();
+    const { error } = await db.from(TABLE).delete().eq('id', Number(btn.dataset.id));
+    if (error) { showError('삭제하지 못했어요', error); return; }
+    await load();
   });
 
   $('filter').addEventListener('change', render);
@@ -428,10 +456,11 @@
     URL.revokeObjectURL(a.href);
   });
 
-  $('resetBtn').addEventListener('click', () => {
-    if (confirm('모든 내역을 삭제합니다. 되돌릴 수 없습니다. 계속할까요?')) {
-      items = []; save(); render();
-    }
+  $('resetBtn').addEventListener('click', async () => {
+    if (!confirm('DB에 있는 모든 내역을 삭제합니다. 되돌릴 수 없습니다. 계속할까요?')) return;
+    const { error } = await db.from(TABLE).delete().gt('id', 0);
+    if (error) { showError('삭제하지 못했어요', error); return; }
+    await load();
   });
 
   // 초기화
@@ -439,6 +468,7 @@
   $('date').value = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
   fillCategories();
   render();
+  migrateLocal().then(load);
 </script>
 </body>
 </html>
