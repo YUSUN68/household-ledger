@@ -27,6 +27,16 @@
     font-size: 30px; margin: 0 0 4px; text-align: center; color: var(--accent-dark);
     letter-spacing: 1px; text-shadow: 2px 2px 0 #fff;
   }
+  .cheer {
+    display: block; width: fit-content; margin: 6px auto 8px; padding: 6px 18px;
+    background: var(--yellow); color: var(--accent-dark); border: 2px dashed #ffcf5c;
+    border-radius: 999px; font-size: 17px; animation: wiggle 2.4s ease-in-out infinite;
+  }
+  @keyframes wiggle {
+    0%, 100% { transform: rotate(-2deg); }
+    50% { transform: rotate(2deg) scale(1.04); }
+  }
+  @media (prefers-reduced-motion: reduce) { .cheer { animation: none; } }
   .subtitle { text-align: center; color: var(--muted); font-size: 15px; margin-bottom: 20px; }
   .card {
     background: var(--card); border-radius: 24px; padding: 20px;
@@ -154,6 +164,7 @@
 <body>
 <div class="wrap">
   <h1>🐷 꿀꿀 가계부 🐷</h1>
+  <div class="cheer">💪 바이브코딩 화이팅! 💪</div>
   <div class="subtitle">오늘도 차곡차곡 모아봐요 🍀</div>
 
   <!-- 월 선택 + 요약 -->
